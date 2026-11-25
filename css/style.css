@@ -254,7 +254,6 @@ details.card[open] summary { margin-bottom: 16px; }
 /* work area: card + side board */
 .work-row { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 24px; align-items: start; }
 .work-row:has(> .done-board.hidden) { grid-template-columns: 1fr; }
-@media (max-width: 1200px) { .work-row { grid-template-columns: 1fr; } }
 .done-board { position: sticky; top: 84px; padding: 24px 22px; max-height: calc(100vh - 110px); overflow: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
 .done-board h4 { margin: 0 0 6px; font-size: 1rem; }
 .board-count { font-size: 1.05rem; margin-bottom: 8px; }
@@ -280,3 +279,5 @@ details.card[open] summary { margin-bottom: 16px; }
 .wh:hover .mask, .wh.open .mask, .wh.ok .mask { visibility: hidden; }
 .wh.used:not(.ok) { background: var(--partial-soft); }
 .wh.ok { background: var(--ok-soft); color: var(--ok); cursor: default; }
+@media (max-width: 1400px) { .work-row { grid-template-columns: minmax(0, 1fr) 240px; gap: 18px; } .done-board { padding: 20px 16px; } }
+@media (max-width: 1100px) { .work-row { grid-template-columns: 1fr; } .done-board { order: -1; position: static; max-height: 220px; } }
