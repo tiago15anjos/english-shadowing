@@ -967,6 +967,21 @@
     saveAttempts(); saveCards(); savePos(); toast("Progresso apagado.");
   });
 
+  // ---------------------------------------------------------------- theme (auto / light / dark)
+  const THEMES = ["auto", "light", "dark"];
+  function applyTheme() {
+    const t = settings.theme || "auto";
+    if (t === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+    $("#themeBtn").textContent = t === "light" ? "☀︎" : t === "dark" ? "☾" : "◐";
+    $("#themeBtn").title = "Tema: " + (t === "light" ? "claro" : t === "dark" ? "escuro" : "automático (segue o Mac)");
+  }
+  $("#themeBtn").addEventListener("click", () => {
+    settings.theme = THEMES[(THEMES.indexOf(settings.theme || "auto") + 1) % THEMES.length];
+    saveSettingsObj(); applyTheme();
+    toast("Tema: " + (settings.theme === "light" ? "claro" : settings.theme === "dark" ? "escuro" : "automático (segue o Mac)"));
+  });
+  applyTheme();
+
   // ---------------------------------------------------------------- boot
   if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => {};
   updateDueBadge();
