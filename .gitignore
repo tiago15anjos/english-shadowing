@@ -1,3 +1,6 @@
 *.png
 !docs/*.png
 .DS_Store
+# private lesson packs (book content) never go to GitHub
+english-wisdom*.json
+lesson-pack*.json

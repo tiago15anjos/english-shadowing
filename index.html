@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">🎙️ English Shadowing</div>
+    <div class="brand">English Shadowing</div>
     <nav class="tabs" role="tablist">
       <button class="tab active" data-tab="shadowing">Shadowing</button>
       <button class="tab" data-tab="flashcards">Flashcards <span id="dueBadge" class="badge hidden"></span></button>
@@ -53,13 +53,13 @@
             </div>
             <div id="targetText" class="target"></div>
             <div id="targetPt" class="pt hidden"></div>
-            <p class="hint muted">Dica: clique numa palavra para salvá-la nos flashcards.</p>
+            <p class="hint muted">Clique numa palavra para ouvir e salvar nos flashcards.</p>
 
             <div class="controls">
               <button id="btnPrev" class="btn" title="Anterior (←)">◀</button>
               <button id="btnPlay" class="btn" title="Ouvir (Espaço)">▶ Ouvir</button>
               <button id="btnSlow" class="btn" title="Devagar (S)">🐢 Devagar</button>
-              <button id="btnRecord" class="btn record" title="Gravar (R)">🎤 Gravar</button>
+              <button id="btnRecord" class="btn record" title="Gravar (R)">● Gravar</button>
               <button id="btnNext" class="btn" title="Próxima (→)">▶︎▶︎</button>
             </div>
             <div id="liveTranscript" class="live muted"></div>
@@ -73,10 +73,12 @@
                   <div id="resultMissed" class="missed"></div>
                 </div>
               </div>
+              <div id="subScores" class="subscores hidden"></div>
+              <div id="phonemeDetail" class="phonemes hidden"></div>
               <div class="controls">
                 <button id="btnMine" class="btn">🔁 Ouvir minha voz</button>
                 <button id="btnCompare" class="btn">🎧 Modelo + minha voz</button>
-                <button id="btnRetry" class="btn">🎤 Tentar de novo</button>
+                <button id="btnRetry" class="btn">● Tentar de novo</button>
               </div>
             </div>
           </div>
@@ -171,6 +173,42 @@
           </div>
           <p id="cacheInfo" class="muted"></p>
           <button id="clearCache" class="btn">Apagar áudios guardados</button>
+        </div>
+
+        <div class="card">
+          <h4>Como avaliar a sua fala</h4>
+          <label class="radio"><input type="radio" name="engine" value="chrome"> <span><b>Chrome (grátis)</b><br><span class="muted">Transcreve o que você disse e compara palavra por palavra.</span></span></label>
+          <label class="inline"><input type="checkbox" id="setStrict"> Modo rigoroso: usar só o primeiro palpite do reconhecimento, sem escolher o que mais se parece com a frase certa</label>
+          <label class="radio"><input type="radio" name="engine" value="azure"> <span><b>Microsoft Pronunciation Assessment</b><br><span class="muted">Dá nota para cada som (fonema), fluência e entonação. Não "corrige" a sua fala. Precisa de uma chave grátis do Azure (5 horas de áudio por mês).</span></span></label>
+          <div id="azureFields">
+            <label>Chave do Azure Speech (Key 1)
+              <input id="setAzureKey" type="password" placeholder="cole aqui a chave" autocomplete="off">
+            </label>
+            <label>Região do recurso (Location/Region)
+              <select id="setAzureRegion">
+                <option value="eastus">East US (eastus)</option>
+                <option value="eastus2">East US 2 (eastus2)</option>
+                <option value="westus2">West US 2 (westus2)</option>
+                <option value="centralus">Central US (centralus)</option>
+                <option value="canadacentral">Canada Central (canadacentral)</option>
+                <option value="brazilsouth">Brazil South (brazilsouth)</option>
+                <option value="westeurope">West Europe (westeurope)</option>
+                <option value="northeurope">North Europe (northeurope)</option>
+                <option value="uksouth">UK South (uksouth)</option>
+              </select>
+            </label>
+            <p class="muted small">Como criar: portal.azure.com → Create a resource → "Speech" → Pricing tier <b>Free F0</b> → depois de criado, abra "Keys and Endpoint" e copie a Key 1 e a Location/Region.</p>
+          </div>
+          <button id="saveEngine" class="btn primary">Salvar</button>
+        </div>
+
+        <div class="card">
+          <h4>Lições do livro</h4>
+          <p class="muted">Importe o arquivo de lições que fica só com você (ex.: <i>english-wisdom-book3.json</i>). Ele fica salvo apenas neste navegador e não vai para o GitHub.</p>
+          <div id="packList" class="pack-list"></div>
+          <div class="controls">
+            <label class="btn primary">⬆ Importar lições <input id="importPack" type="file" accept="application/json,.json" hidden></label>
+          </div>
         </div>
 
         <div class="card">
