@@ -236,3 +236,17 @@ details.card[open] summary { margin-bottom: 16px; }
 .theme-btn { border: 0; background: var(--fill); color: var(--text); width: 34px; height: 34px; border-radius: 50%; cursor: pointer; font-size: 1.1rem; line-height: 1; display: grid; place-items: center; }
 .theme-btn:hover { background: var(--fill-hover); }
 .top-right { display: flex; align-items: center; gap: 12px; }
+
+/* writing + conversation modes */
+.pt-prompt { color: var(--text); }
+.sentence-card[data-mode="write"] .target { font-weight: 600; }
+.write-box textarea {
+  width: 100%; margin-top: 20px; padding: 18px 20px; font: inherit; font-size: 1.5rem; line-height: 1.4; letter-spacing: -0.015em;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); resize: vertical;
+}
+.write-box textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.kbd-hint { font-size: .72rem; opacity: .75; border: 1px solid rgba(255,255,255,.5); border-radius: 5px; padding: 0 5px; }
+.answer-text { font-weight: 500; }
+
+.reading p { line-height: 1.6; margin: 0 0 .7em; }
+.small { font-size: .85rem; }

@@ -57,9 +57,17 @@
             </div>
             <div id="targetText" class="target"></div>
             <div id="targetPt" class="pt hidden"></div>
-            <p class="hint muted">Clique numa palavra para ouvir e salvar nos flashcards.</p>
+            <p id="hint" class="hint muted">Clique numa palavra para ouvir e salvar nos flashcards.</p>
 
-            <div class="controls">
+            <div id="writeBox" class="write-box hidden">
+              <textarea id="writeInput" rows="2" placeholder="Escreva a frase em inglês…" autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="false"></textarea>
+              <div class="controls">
+                <button id="btnCheck" class="btn primary">Verificar <span class="kbd-hint">Enter</span></button>
+                <button id="btnReveal" class="btn">Ver resposta</button>
+              </div>
+            </div>
+
+            <div id="mainControls" class="controls">
               <button id="btnPrev" class="btn" title="Anterior (←)">◀</button>
               <button id="btnPlay" class="btn" title="Ouvir (Espaço)">▶ Ouvir</button>
               <button id="btnSlow" class="btn" title="Devagar (S)">🐢 Devagar</button>
@@ -73,7 +81,7 @@
                 <div id="scoreCircle" class="score-circle"></div>
                 <div>
                   <div id="resultTarget" class="target small"></div>
-                  <div class="muted">Você disse: <span id="resultSaid"></span></div>
+                  <div class="muted"><span id="saidLabel">Você disse:</span> <span id="resultSaid"></span></div>
                   <div id="resultMissed" class="missed"></div>
                 </div>
               </div>

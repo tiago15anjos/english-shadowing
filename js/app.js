@@ -202,7 +202,7 @@
 
   // Listens until the learner stops talking (or clicks again). Resolves with
   // { alternatives: [string], audio: Blob|null }.
-  async function listen(onInterim) {
+  async function listen(onInterim, longAnswer = false) {
     if (!SR) throw new Error("no-speech-api");
     let recorder = null, chunks = [];
     try {
@@ -235,7 +235,7 @@
         heardSomething = true;
         const finalText = segments.filter(Boolean).map((s) => s[0]).join(" ");
         onInterim && onInterim((finalText + " " + interim).trim());
-        armSilence(1800);
+        armSilence(longAnswer ? 3500 : 1800);
       };
       rec.onerror = (e) => { error = e.error; };
       rec.onend = () => {
@@ -339,6 +339,12 @@
         ${lesson.verbs ? `<table class="table">${lesson.verbs.map((v) => `<tr><td><b>${esc(v.forms)}</b></td><td class="muted">${esc(v.pt)}</td></tr>`).join("")}</table>` : ""}
       </details>`;
     }
+    if (lesson.text && lesson.text.length) {
+      header += `<details class="card grammar reading" open><summary>${esc(lesson.textTitle || "Texto da lição")}</summary>
+        ${lesson.text.map((p) => `<p>${esc(p)}</p>`).join("")}
+        ${lesson.notes && lesson.notes.length ? `<p class="muted small">${lesson.notes.map(esc).join("<br>")}</p>` : ""}
+      </details>`;
+    }
     $("#lessonHeader").innerHTML = header;
 
     // section chips
@@ -357,8 +363,20 @@
     renderSentence();
   }
 
+  // Section modes: "shadow" (listen & repeat), "write" (PT -> type EN), "answer" (hear a question, answer freely).
+  function sectionMode(sec) {
+    if (!sec) return "shadow";
+    if (sec.mode) return sec.mode;
+    if (sec.key === "writing") return "write";
+    if (sec.key === "questions") return "answer";
+    return "shadow";
+  }
+  const currentMode = () => sectionMode(currentSection().sec);
+  let writeChecked = false;
+
   function renderSentence() {
     const it = currentItem();
+    writeChecked = false;
     const card = $("#sentenceCard");
     $("#result").classList.add("hidden");
     $("#liveTranscript").textContent = "";
@@ -372,7 +390,37 @@
     card.classList.remove("empty");
     const { sec } = currentSection();
     const best = bestScores()[it.sid];
-    $("#counter").innerHTML = `Frase ${pos.index + 1} de ${sec.items.length}${best != null ? ` · melhor nota: <b>${best}%</b>` : ""}`;
+    const mode = sectionMode(sec);
+    const label = mode === "write" ? "Exercício" : mode === "answer" ? "Pergunta" : "Frase";
+    $("#counter").innerHTML = `${label} ${pos.index + 1} de ${sec.items.length}${best != null && mode !== "answer" ? ` · melhor nota: <b>${best}</b>` : best != null ? " · respondida ✓" : ""}`;
+    card.dataset.mode = mode;
+    $(".toggles").classList.toggle("hidden", mode !== "shadow");
+    $("#writeBox").classList.toggle("hidden", mode !== "write");
+    $("#btnRecord").classList.toggle("hidden", mode === "write");
+    $("#btnPlay").classList.toggle("hidden", mode === "write");
+    $("#btnSlow").classList.toggle("hidden", mode === "write");
+    $("#saidLabel").textContent = mode === "write" ? "Você escreveu:" : mode === "answer" ? "Sua resposta:" : "Você disse:";
+
+    if (mode === "write") {
+      $("#targetText").innerHTML = `<span class="pt-prompt">${esc(it.pt || "")}</span>`;
+      $("#targetText").classList.remove("blurred");
+      $("#targetPt").classList.add("hidden");
+      $("#hint").textContent = "Escreva em inglês e aperte Enter. Depois você ouve a resposta certa.";
+      $("#writeInput").value = "";
+      setTimeout(() => $("#writeInput").focus(), 0);
+      return;
+    }
+    if (mode === "answer") {
+      $("#targetText").innerHTML = wordSpans(it.en);
+      $("#targetText").classList.remove("blurred");
+      $("#targetPt").classList.add("hidden");
+      $("#hint").textContent = "Ouça a pergunta e responda falando, com frases completas. Não há resposta certa.";
+      const prev = store.get("answers", {})[it.sid];
+      if (prev) $("#liveTranscript").innerHTML = `Sua última resposta: <i>${esc(prev)}</i>`;
+      bindWordClicks($("#targetText"), it);
+      return;
+    }
+    $("#hint").textContent = "Clique numa palavra para ouvir e salvar nos flashcards.";
     $("#targetText").innerHTML = wordSpans(it.en);
     $("#targetText").classList.toggle("blurred", settings.hideText);
     $("#targetPt").textContent = it.pt || "";
@@ -381,6 +429,33 @@
     $("#toggleHideText").checked = settings.hideText;
     bindWordClicks($("#targetText"), it);
   }
+
+  // ---- writing exercise: Portuguese prompt -> learner types English -> compared with the answer key
+  function checkWriting(reveal = false) {
+    const it = currentItem(); if (!it || currentMode() !== "write") return;
+    const typed = $("#writeInput").value.trim();
+    if (!typed && !reveal) { toast("Escreva a frase em inglês primeiro."); return; }
+    // The answer key sometimes accepts a second version (e.g. "a shot" / "an injection"): keep the closer one.
+    let target = it, r = Compare.compare(it.en, typed);
+    for (const alt of [].concat(it.alt || [])) {
+      const ra = Compare.compare(alt, typed);
+      if (ra.score > r.score) { r = ra; target = Object.assign({}, it, { en: alt }); }
+    }
+    if (reveal && !typed) r.score = 0;
+    writeChecked = true;
+    $("#btnPlay").classList.remove("hidden"); $("#btnSlow").classList.remove("hidden");
+    showResult(target, typed || "(sem resposta)", r, { engine: "writing" });
+    if (it.alt && target === it) toast("Também vale: " + [].concat(it.alt).join(" / "));
+    speak(it.en);
+  }
+  $("#btnCheck").addEventListener("click", () => checkWriting(false));
+  $("#btnReveal").addEventListener("click", () => checkWriting(true));
+  $("#writeInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (writeChecked) move(1); else checkWriting(false);
+    }
+  });
 
   function wordSpans(text, statuses) {
     return text.split(/\s+/).map((w, i) => {
@@ -498,7 +573,13 @@
     $("#liveTranscript").textContent = "Pode falar…";
     $("#result").classList.add("hidden");
     try {
-      if (useAzure()) {
+      if (currentMode() === "answer") {
+        if (!SR) throw new Error("use o Google Chrome para responder falando");
+        const { alternatives, audio, heard } = await listen((t) => { $("#liveTranscript").textContent = t; }, true);
+        lastRecording = audio;
+        if (!heard) { $("#liveTranscript").textContent = "Não ouvi nada. Verifique o microfone e tente de novo."; return; }
+        showAnswer(it, alternatives[0]);
+      } else if (useAzure()) {
         recognizing = { stop: () => {} };
         $("#liveTranscript").textContent = "Pode falar… (avaliação da Microsoft)";
         const az = await assessWithAzure(it.en, (t) => { $("#liveTranscript").textContent = t; });
@@ -543,7 +624,7 @@
     $("#resultSaid").innerHTML = r.said.length ? r.said.map((x) => `<span class="${x.status === "extra" ? "extra" : ""}">${esc(x.text)}</span>`).join(" ") : "<i>(nada)</i>";
 
     const circle = $("#scoreCircle");
-    circle.innerHTML = `<span>${r.score}</span><small>${isAzure ? "pronúncia" : "palavras"}</small>`;
+    circle.innerHTML = `<span>${r.score}</span><small>${isAzure ? "pronúncia" : meta.engine === "writing" ? "escrita" : "palavras"}</small>`;
     circle.className = "score-circle " + (r.score >= 90 ? "great" : r.score >= settings.pass ? "good" : r.score >= 50 ? "ok" : "low");
 
     // sub-scores (Microsoft) or recognizer confidence (Chrome)
@@ -580,7 +661,25 @@
     renderLessonList();
     const { sec } = currentSection();
     const best = bestScores()[it.sid];
-    $("#counter").innerHTML = `Frase ${pos.index + 1} de ${sec.items.length} · melhor nota: <b>${best}</b>`;
+    $("#counter").innerHTML = `${currentMode() === "write" ? "Exercício" : "Frase"} ${pos.index + 1} de ${sec.items.length} · melhor nota: <b>${best}</b>`;
+  }
+
+  // Free answer to a conversation question: show the transcript, keep it, no score.
+  function showAnswer(it, text) {
+    $("#liveTranscript").textContent = "";
+    const answers = store.get("answers", {}); answers[it.sid] = text; store.set("answers", answers);
+    $("#resultTarget").innerHTML = `<span class="answer-text">${esc(text)}</span>`;
+    $("#resultSaid").textContent = "";
+    $("#saidLabel").textContent = "Leia o que o app entendeu. Se saiu diferente do que você quis dizer, tente de novo com calma.";
+    const circle = $("#scoreCircle");
+    circle.innerHTML = `<span>✓</span><small>respondida</small>`;
+    circle.className = "score-circle great";
+    $("#subScores").classList.add("hidden"); $("#phonemeDetail").classList.add("hidden");
+    $("#resultMissed").innerHTML = "";
+    $("#btnMine").disabled = $("#btnCompare").disabled = !lastRecording;
+    $("#result").classList.remove("hidden");
+    attempts.push({ t: Date.now(), lesson: it.lesson.id, sid: it.sid, target: it.en, said: text, score: 100, missed: [], engine: "answer" });
+    saveAttempts(); renderLessonList();
   }
 
   // Phoneme breakdown of one word (Microsoft engine).
