@@ -30,6 +30,7 @@
   const DEFAULT_SETTINGS = {
     apiKey: "", voiceId: "21m00Tcm4TlvDq8ikWAM", model: "eleven_multilingual_v2",
     slow: 0.75, autoAdd: true, pass: 80, showPt: false, hideText: false,
+    strict: true, engine: "chrome", azureKey: "", azureRegion: "eastus",
   };
   const PRESET_VOICES = [
     { id: "21m00Tcm4TlvDq8ikWAM", name: "Rachel (feminina, americana)" },
@@ -50,7 +51,12 @@
       sections: [{ key: "custom", title: "Minhas frases", items }],
     };
   }
-  const allLessons = () => [...window.LESSONS, customLesson()];
+  // Lesson packs imported by the learner (e.g. the private book file). Kept only in this browser.
+  const VOCAB_KEYS = new Set(["vocab", "idioms", "ordinals"]);
+  function packLessons() {
+    return store.get("packs", []).flatMap((p) => (p.lessons || []).map((l) => ({ ...l, group: p.name })));
+  }
+  const allLessons = () => [...packLessons(), ...window.LESSONS.map((l) => ({ ...l, group: "Lições do app" })), { ...customLesson(), group: "Suas frases" }];
   const getLesson = (id) => allLessons().find((l) => l.id === id) || window.LESSONS[0];
   const sentenceId = (lessonId, sIdx, item, iIdx) => item.id || `${lessonId}-${sIdx}-${iIdx}`;
   function lessonSentences(lesson) {
@@ -60,14 +66,23 @@
   }
 
   // Glossary (English word -> Portuguese) built from the lessons, for flashcards.
-  const glossary = {};
-  for (const l of window.LESSONS) {
-    for (const v of l.verbs || []) {
-      v.forms.replace(/\(.*?\)/g, "").split(/[,/]/).map((f) => f.trim().replace(/^to /, "").toLowerCase())
-        .filter(Boolean).forEach((f) => { if (!glossary[f]) glossary[f] = v.pt; });
+  let glossary = {};
+  function rebuildGlossary() {
+    glossary = {};
+    for (const l of [...packLessons(), ...window.LESSONS]) {
+      for (const v of l.verbs || []) {
+        v.forms.replace(/\(.*?\)/g, "").split(/[,/]/).map((f) => f.trim().replace(/^to /, "").toLowerCase())
+          .filter(Boolean).forEach((f) => { if (!glossary[f]) glossary[f] = v.pt; });
+      }
+      for (const sec of l.sections) for (const it of sec.items) {
+        const w = it.word || (VOCAB_KEYS.has(sec.key) ? it.en : null);
+        const pt = it.wordPt || (VOCAB_KEYS.has(sec.key) ? it.pt : null);
+        const k = w && w.toLowerCase().replace(/^to /, "");
+        if (k && pt && !glossary[k]) glossary[k] = pt;
+      }
     }
-    for (const s of l.sections) for (const it of s.items) if (it.word && it.wordPt) glossary[it.word.toLowerCase()] = it.wordPt;
   }
+  rebuildGlossary();
 
   // ---------------------------------------------------------------- state
   let pos = store.get("pos", { lesson: "l1", section: 0, index: 0 });
@@ -204,6 +219,7 @@
       rec.interimResults = true;
       rec.maxAlternatives = 3;
       const segments = []; // per final result: [alt1, alt2, ...]
+      const confidences = [];
       let silenceTimer = null, heardSomething = false, error = null;
 
       const armSilence = (ms) => { clearTimeout(silenceTimer); silenceTimer = setTimeout(() => rec.stop(), ms); };
@@ -213,7 +229,7 @@
         let interim = "";
         for (let i = e.resultIndex; i < e.results.length; i++) {
           const r = e.results[i];
-          if (r.isFinal) segments[i] = [...r].map((a) => a.transcript.trim());
+          if (r.isFinal) { segments[i] = [...r].map((a) => a.transcript.trim()); confidences[i] = r[0].confidence; }
           else interim += r[0].transcript;
         }
         heardSomething = true;
@@ -228,7 +244,9 @@
         const finish = () => {
           const audio = chunks.length ? new Blob(chunks, { type: recorder?.mimeType || "audio/webm" }) : null;
           if (error && error !== "no-speech" && error !== "aborted") return reject(new Error(error));
-          resolve({ alternatives: combineSegments(segments.filter(Boolean)), audio, heard: heardSomething });
+          const confs = confidences.filter((c) => typeof c === "number" && c > 0);
+          const confidence = confs.length ? confs.reduce((a, b) => a + b, 0) / confs.length : null;
+          resolve({ alternatives: combineSegments(segments.filter(Boolean)), audio, heard: heardSomething, confidence });
         };
         if (recorder && recorder.state !== "inactive") { recorder.onstop = finish; recorder.stop(); }
         else finish();
@@ -278,14 +296,17 @@
 
   function renderLessonList() {
     const best = bestScores();
+    let lastGroup = null;
     $("#lessonList").innerHTML = allLessons().map((l) => {
       const p = lessonProgress(l, best);
-      return `<li class="${l.id === pos.lesson ? "active" : ""}" data-id="${l.id}">
+      const head = l.group !== lastGroup ? `<li class="group">${esc(l.group)}</li>` : "";
+      lastGroup = l.group;
+      return head + `<li class="${l.id === pos.lesson ? "active" : ""}" data-id="${l.id}">
         <div class="ll-title"><span class="ll-num">${esc(l.number)}</span> ${esc(l.title)}</div>
         <div class="bar"><div style="width:${p.pct}%"></div></div>
         <div class="muted small">${p.done}/${p.total} dominadas</div></li>`;
     }).join("");
-    $$("#lessonList li").forEach((li) => li.addEventListener("click", () => {
+    $$("#lessonList li[data-id]").forEach((li) => li.addEventListener("click", () => {
       pos = { lesson: li.dataset.id, section: 0, index: 0 }; savePos(); renderShadowing();
     }));
   }
@@ -311,8 +332,9 @@
 
     // header + grammar box
     let header = `<h2>${lesson.id === CUSTOM_ID ? "" : `Lesson ${esc(lesson.number)} · `}${esc(lesson.title)}</h2><p class="muted">${esc(lesson.subtitle || "")}</p>`;
+    header = `<div class="eyebrow">${esc(lesson.group || "")}</div>` + header;
     if (lesson.grammarPt) {
-      header += `<details class="card grammar"><summary>📖 Gramática e verbos da lição</summary>
+      header += `<details class="card grammar"><summary>Gramática e verbos da lição</summary>
         <p>${esc(lesson.grammarPt)}</p>
         ${lesson.verbs ? `<table class="table">${lesson.verbs.map((v) => `<tr><td><b>${esc(v.forms)}</b></td><td class="muted">${esc(v.pt)}</td></tr>`).join("")}</table>` : ""}
       </details>`;
@@ -377,62 +399,206 @@
     }));
   }
 
+  // ---------------------------------------------------------------- Microsoft Pronunciation Assessment
+  const SDK_URL = "https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@1.52.0/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle-min.js";
+  let sdkPromise = null;
+  function loadSpeechSDK() {
+    if (window.SpeechSDK) return Promise.resolve(window.SpeechSDK);
+    return sdkPromise || (sdkPromise = new Promise((resolve, reject) => {
+      const sc = document.createElement("script");
+      sc.src = SDK_URL;
+      sc.onload = () => (window.SpeechSDK ? resolve(window.SpeechSDK) : reject(new Error("SDK da Microsoft não carregou")));
+      sc.onerror = () => { sdkPromise = null; reject(new Error("não consegui baixar o SDK da Microsoft (sem internet?)")); };
+      document.head.appendChild(sc);
+    }));
+  }
+  const useAzure = () => settings.engine === "azure" && settings.azureKey;
+
+  async function assessWithAzure(text, onInterim) {
+    const SDK = await loadSpeechSDK();
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    let recorder = null; const chunks = [];
+    try { recorder = new MediaRecorder(stream); recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data); recorder.start(); } catch { recorder = null; }
+
+    const speechConfig = SDK.SpeechConfig.fromSubscription(settings.azureKey, settings.azureRegion);
+    speechConfig.speechRecognitionLanguage = "en-US";
+    const audioConfig = SDK.AudioConfig.fromStreamInput(stream);
+    const pa = new SDK.PronunciationAssessmentConfig(text, SDK.PronunciationAssessmentGradingSystem.HundredMark, SDK.PronunciationAssessmentGranularity.Phoneme, true);
+    pa.phonemeAlphabet = "IPA";
+    pa.nbestPhonemeCount = 3;
+    try { pa.enableProsodyAssessment = true; } catch {}
+    const rec = new SDK.SpeechRecognizer(speechConfig, audioConfig);
+    pa.applyTo(rec);
+    rec.recognizing = (_s, e) => onInterim && onInterim(e.result.text);
+
+    let result;
+    try {
+      result = await new Promise((res, rej) => rec.recognizeOnceAsync(res, rej));
+    } finally {
+      try { rec.close(); } catch {}
+    }
+    const audio = await new Promise((res) => {
+      if (!recorder || recorder.state === "inactive") return res(chunks.length ? new Blob(chunks) : null);
+      recorder.onstop = () => res(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
+      recorder.stop();
+    });
+    stream.getTracks().forEach((t) => t.stop());
+
+    if (result.reason === SDK.ResultReason.NoMatch) return { heard: false, audio };
+    if (result.reason === SDK.ResultReason.Canceled) {
+      const d = SDK.CancellationDetails.fromResult(result);
+      throw new Error(/401|auth/i.test(d.errorDetails || "") ? "chave ou região do Azure inválida" : (d.errorDetails || "cancelado"));
+    }
+    const json = JSON.parse(result.properties.getProperty(SDK.PropertyId.SpeechServiceResponse_JsonResult));
+    const nb = (json.NBest || [])[0];
+    if (!nb) return { heard: false, audio };
+    return { heard: true, audio, text: result.text, scores: nb.PronunciationAssessment || {}, words: nb.Words || [] };
+  }
+
+  // Turn the Azure word list into the same shape the Chrome comparison produces.
+  function azureToResult(target, az) {
+    const status = (w) => {
+      const e = w.PronunciationAssessment?.ErrorType;
+      const acc = w.PronunciationAssessment?.AccuracyScore ?? 0;
+      if (e === "Omission") return "miss";
+      if (acc >= 80 && e !== "Mispronunciation") return "ok";
+      if (acc >= 60) return "partial";
+      return "miss";
+    };
+    const refWords = az.words.filter((w) => w.PronunciationAssessment?.ErrorType !== "Insertion");
+    const tokens = target.split(/\s+/);
+    const cleanTokens = tokens.filter((t) => Compare.cleanToken(t));
+    let display, details = [];
+    if (refWords.length === cleanTokens.length) {
+      let k = 0;
+      display = tokens.map((t) => {
+        if (!Compare.cleanToken(t)) return { text: t, status: "punct" };
+        const w = refWords[k++];
+        details.push(w);
+        return { text: t, status: status(w), word: Compare.cleanToken(t), detail: details.length - 1 };
+      });
+    } else {
+      display = refWords.map((w) => { details.push(w); return { text: w.Word, status: status(w), word: w.Word.toLowerCase(), detail: details.length - 1 }; });
+    }
+    const missed = [];
+    display.forEach((t) => { if ((t.status === "miss" || t.status === "partial") && t.word && !missed.includes(t.word)) missed.push(t.word); });
+    const said = az.words.filter((w) => w.PronunciationAssessment?.ErrorType !== "Omission")
+      .map((w) => ({ text: w.Word, status: w.PronunciationAssessment?.ErrorType === "Insertion" ? "extra" : "ok" }));
+    return { score: Math.round(az.scores.PronScore ?? az.scores.AccuracyScore ?? 0), tokens: display, said, missed, details, scores: az.scores };
+  }
+
   async function doRecord() {
     if (recognizing) { recognizing.stop(); return; }
     const it = currentItem();
     if (!it) return;
-    if (!SR) { toast("Use o Google Chrome para gravar."); return; }
+    if (!useAzure() && !SR) { toast("Use o Google Chrome para gravar, ou configure a avaliação da Microsoft."); return; }
     stopAudio();
     const btn = $("#btnRecord");
-    btn.classList.add("recording"); btn.textContent = "⏹ Parar";
+    btn.classList.add("recording"); btn.textContent = "■ Parar";
     $("#liveTranscript").textContent = "Pode falar…";
     $("#result").classList.add("hidden");
     try {
-      const { alternatives, audio, heard } = await listen((t) => { $("#liveTranscript").textContent = t; });
-      lastRecording = audio;
-      if (!heard) { $("#liveTranscript").textContent = "Não ouvi nada. Verifique o microfone e tente de novo."; return; }
-      const best = Compare.bestAlternative(it.en, alternatives);
-      showResult(it, best.text, best.result);
+      if (useAzure()) {
+        recognizing = { stop: () => {} };
+        $("#liveTranscript").textContent = "Pode falar… (avaliação da Microsoft)";
+        const az = await assessWithAzure(it.en, (t) => { $("#liveTranscript").textContent = t; });
+        lastRecording = az.audio;
+        if (!az.heard) { $("#liveTranscript").textContent = "Não ouvi nada. Verifique o microfone e tente de novo."; return; }
+        showResult(it, az.text, azureToResult(it.en, az), { engine: "azure" });
+      } else {
+        const { alternatives, audio, heard, confidence } = await listen((t) => { $("#liveTranscript").textContent = t; });
+        lastRecording = audio;
+        if (!heard) { $("#liveTranscript").textContent = "Não ouvi nada. Verifique o microfone e tente de novo."; return; }
+        // Strict mode: the recognizer's first guess, exactly as it heard it.
+        // Lenient mode: the guess that best matches the target sentence.
+        const pick = settings.strict ? { text: alternatives[0], result: Compare.compare(it.en, alternatives[0]) } : Compare.bestAlternative(it.en, alternatives);
+        showResult(it, pick.text, pick.result, { engine: settings.strict ? "chrome-strict" : "chrome", confidence });
+      }
     } catch (e) {
-      const msg = e.message === "not-allowed" ? "O navegador bloqueou o microfone. Clique no cadeado da barra de endereço e permita o microfone."
+      const msg = e.message === "not-allowed" || e.name === "NotAllowedError" ? "O navegador bloqueou o microfone. Clique no cadeado da barra de endereço e permita o microfone."
         : e.message === "network" ? "O reconhecimento de voz do Chrome precisa de internet."
-        : "Erro no reconhecimento: " + e.message;
+        : "Erro na avaliação: " + e.message;
       $("#liveTranscript").textContent = msg;
     } finally {
-      btn.classList.remove("recording"); btn.textContent = "🎤 Gravar";
+      recognizing = null;
+      btn.classList.remove("recording"); btn.textContent = "● Gravar";
     }
   }
 
-  function showResult(it, said, r) {
+  function showResult(it, said, r, meta = {}) {
     $("#liveTranscript").textContent = "";
     const statuses = r.tokens.map((t) => t.status);
-    $("#resultTarget").innerHTML = wordSpans(it.en, statuses);
-    bindWordClicks($("#resultTarget"), it);
-    $("#resultSaid").innerHTML = r.said.length ? r.said.map((s) => `<span class="${s.status === "extra" ? "extra" : ""}">${esc(s.text)}</span>`).join(" ") : "<i>(nada)</i>";
+    const isAzure = meta.engine === "azure";
+    $("#resultTarget").innerHTML = isAzure
+      ? r.tokens.map((t) => `<span class="w ${t.status}" ${t.detail != null ? `data-detail="${t.detail}"` : ""} data-w="${esc(t.text)}">${esc(t.text)}</span>`).join(" ")
+      : wordSpans(it.en, statuses);
+    if (isAzure) {
+      $$("#resultTarget .w").forEach((s) => s.addEventListener("click", () => showPhonemes(r.details[+s.dataset.detail], s.dataset.w)));
+      const firstBad = r.tokens.find((t) => t.status !== "ok" && t.detail != null);
+      if (firstBad) showPhonemes(r.details[firstBad.detail], firstBad.text); else $("#phonemeDetail").classList.add("hidden");
+    } else {
+      bindWordClicks($("#resultTarget"), it);
+      $("#phonemeDetail").classList.add("hidden");
+    }
+    $("#resultSaid").innerHTML = r.said.length ? r.said.map((x) => `<span class="${x.status === "extra" ? "extra" : ""}">${esc(x.text)}</span>`).join(" ") : "<i>(nada)</i>";
+
     const circle = $("#scoreCircle");
-    circle.textContent = r.score + "%";
+    circle.innerHTML = `<span>${r.score}</span><small>${isAzure ? "pronúncia" : "palavras"}</small>`;
     circle.className = "score-circle " + (r.score >= 90 ? "great" : r.score >= settings.pass ? "good" : r.score >= 50 ? "ok" : "low");
+
+    // sub-scores (Microsoft) or recognizer confidence (Chrome)
+    const sub = $("#subScores");
+    if (isAzure) {
+      const sc = r.scores;
+      const row = (label, v) => v == null ? "" : `<div class="sub"><div class="sub-v">${Math.round(v)}</div><div class="sub-l">${label}</div></div>`;
+      sub.innerHTML = row("Precisão dos sons", sc.AccuracyScore) + row("Fluência", sc.FluencyScore) + row("Completude", sc.CompletenessScore) + row("Entonação", sc.ProsodyScore);
+      sub.classList.remove("hidden");
+    } else if (meta.confidence != null) {
+      const c = Math.round(meta.confidence * 100);
+      sub.innerHTML = `<div class="muted small">Certeza do reconhecimento: <b>${c}%</b>${c < 70 ? " · o Chrome ficou em dúvida sobre o que ouviu, então vale repetir com mais clareza." : ""}${meta.engine === "chrome-strict" ? " · modo rigoroso" : ""}</div>`;
+      sub.classList.remove("hidden");
+    } else sub.classList.add("hidden");
 
     let missedHtml = "";
     if (r.missed.length) {
-      missedHtml = `Palavras para treinar: ${r.missed.map((w) => `<button class="pill" data-w="${esc(w)}">🔊 ${esc(w)}</button>`).join(" ")}`;
+      missedHtml = `Para treinar: ${r.missed.map((w) => `<button class="pill" data-w="${esc(w)}">🔊 ${esc(w)}</button>`).join(" ")}`;
       if (settings.autoAdd) {
         const added = r.missed.filter((w) => !COMMON_WORDS.has(w) && addCard(w, it.en, it.pt));
         if (added.length) missedHtml += `<div class="muted small">Enviadas para os flashcards: ${added.map(esc).join(", ")}</div>`;
       }
-    } else missedHtml = r.score === 100 ? "Perfeito! 🎉" : "";
+    } else missedHtml = r.score >= 95 ? "Perfeito! 🎉" : "";
     $("#resultMissed").innerHTML = missedHtml;
     $$("#resultMissed .pill").forEach((b) => b.addEventListener("click", () => speak(b.dataset.w, true)));
 
     $("#btnMine").disabled = $("#btnCompare").disabled = !lastRecording;
     $("#result").classList.remove("hidden");
 
-    attempts.push({ t: Date.now(), lesson: it.lesson.id, sid: it.sid, target: it.en, said, score: r.score, missed: r.missed });
+    const attempt = { t: Date.now(), lesson: it.lesson.id, sid: it.sid, target: it.en, said, score: r.score, missed: r.missed, engine: meta.engine };
+    if (isAzure) attempt.scores = r.scores;
+    attempts.push(attempt);
     saveAttempts();
     renderLessonList();
     const { sec } = currentSection();
     const best = bestScores()[it.sid];
-    $("#counter").innerHTML = `Frase ${pos.index + 1} de ${sec.items.length} · melhor nota: <b>${best}%</b>`;
+    $("#counter").innerHTML = `Frase ${pos.index + 1} de ${sec.items.length} · melhor nota: <b>${best}</b>`;
+  }
+
+  // Phoneme breakdown of one word (Microsoft engine).
+  function showPhonemes(w, label) {
+    const box = $("#phonemeDetail");
+    if (!w || !w.Phonemes || !w.Phonemes.length) { box.classList.add("hidden"); return; }
+    const acc = Math.round(w.PronunciationAssessment?.AccuracyScore ?? 0);
+    const err = w.PronunciationAssessment?.ErrorType;
+    const cls = (v) => (v >= 80 ? "ok" : v >= 60 ? "partial" : "miss");
+    const items = w.Phonemes.map((ph) => {
+      const v = Math.round(ph.PronunciationAssessment?.AccuracyScore ?? 0);
+      const heard = ph.PronunciationAssessment?.NBestPhonemes?.[0]?.Phoneme;
+      const swap = heard && heard !== ph.Phoneme && v < 80 ? `<div class="ph-heard">soou /${esc(heard)}/</div>` : "";
+      return `<div class="ph ${cls(v)}"><div class="ph-sym">/${esc(ph.Phoneme)}/</div><div class="ph-v">${v}</div>${swap}</div>`;
+    }).join("");
+    box.innerHTML = `<div class="ph-head"><b>${esc(label)}</b> · ${acc}/100${err === "Omission" ? " · palavra não dita" : err === "Mispronunciation" ? " · pronúncia diferente" : ""} <button class="link" id="phSpeak">🔊 ouvir devagar</button></div><div class="ph-row">${items}</div><div class="muted small">Toque em outra palavra para ver os sons dela.</div>`;
+    $("#phSpeak").onclick = () => speak(label.replace(/[^\w'’ -]/g, ""), true);
+    box.classList.remove("hidden");
   }
 
   function move(delta) {
@@ -687,8 +853,60 @@
     $("#setSlow").value = String(settings.slow);
     $("#setAutoAdd").checked = settings.autoAdd;
     $("#setPass").value = String(settings.pass);
+    $$('input[name="engine"]').forEach((r) => (r.checked = r.value === settings.engine));
+    $("#setStrict").checked = settings.strict;
+    $("#setAzureKey").value = settings.azureKey;
+    $("#setAzureRegion").value = settings.azureRegion;
+    $("#azureFields").classList.toggle("dim", settings.engine !== "azure");
+    renderPackList();
     refreshCacheInfo();
   }
+
+  function renderPackList() {
+    const packs = store.get("packs", []);
+    $("#packList").innerHTML = packs.length
+      ? packs.map((p, i) => {
+          const n = (p.lessons || []).reduce((a, l) => a + l.sections.reduce((b, sc) => b + sc.items.length, 0), 0);
+          return `<div class="pack"><div><b>${esc(p.name)}</b><div class="muted small">${(p.lessons || []).length} lições · ${n} itens</div></div><button class="link" data-rm="${i}">remover</button></div>`;
+        }).join("")
+      : `<p class="muted small">Nenhum arquivo importado.</p>`;
+    $$("#packList [data-rm]").forEach((b) => b.addEventListener("click", () => {
+      if (!confirm("Remover estas lições do app? Seu progresso nelas continua salvo.")) return;
+      const packs2 = store.get("packs", []); packs2.splice(+b.dataset.rm, 1); store.set("packs", packs2);
+      rebuildGlossary(); renderPackList();
+      if (!allLessons().some((l) => l.id === pos.lesson)) { pos = { lesson: allLessons()[0].id, section: 0, index: 0 }; savePos(); }
+    }));
+  }
+
+  $("#importPack").addEventListener("change", async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const d = JSON.parse(await f.text());
+      if (d.type !== "lesson-pack" || !Array.isArray(d.lessons) || !d.lessons.length) throw new Error("este arquivo não é um pacote de lições");
+      for (const l of d.lessons) if (!l.id || !Array.isArray(l.sections)) throw new Error("lição sem id ou seções");
+      const packs = store.get("packs", []).filter((p) => p.name !== d.name);
+      packs.unshift({ name: d.name || f.name, lessons: d.lessons });
+      store.set("packs", packs);
+      rebuildGlossary();
+      pos = { lesson: d.lessons[0].id, section: 0, index: 0 }; savePos();
+      renderPackList();
+      toast(`${d.lessons.length} lições importadas! Elas aparecem no topo da aba Shadowing.`, 5000);
+    } catch (err) { toast("Não consegui importar: " + esc(err.message), 6000); }
+    e.target.value = "";
+  });
+
+  $$('input[name="engine"]').forEach((r) => r.addEventListener("change", () => $("#azureFields").classList.toggle("dim", r.value !== "azure" || !r.checked)));
+  $("#saveEngine").addEventListener("click", () => {
+    const eng = $$('input[name="engine"]').find((r) => r.checked)?.value || "chrome";
+    settings.engine = eng;
+    settings.strict = $("#setStrict").checked;
+    settings.azureKey = $("#setAzureKey").value.trim();
+    settings.azureRegion = $("#setAzureRegion").value;
+    saveSettingsObj();
+    if (eng === "azure" && !settings.azureKey) toast("Cole a chave do Azure para usar a avaliação da Microsoft. Até lá, o app usa o Chrome.", 6000);
+    else toast("Salvo.");
+    if (eng === "azure") loadSpeechSDK().catch((e2) => toast(esc(e2.message)));
+  });
 
   function readSettingsForm() {
     settings.apiKey = $("#setKey").value.trim();

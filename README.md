@@ -16,6 +16,13 @@ Funciona no **Google Chrome no computador** (o reconhecimento de voz grátis do 
 - **Flashcards**: inglês na frente, português atrás, com revisão espaçada (o que você erra volta mais cedo).
   As palavras que você erra no shadowing vão para os cartões automaticamente, e você pode clicar em qualquer palavra da frase para salvá-la.
 - **Meu Progresso**: média por dia, dias seguidos, frases dominadas e o ranking das palavras que você mais erra.
+- **Lições do livro (particular)**: em *Configurações → Lições do livro*, importe o arquivo `.json` com as lições.
+  Ele fica salvo só no seu navegador; o conteúdo do livro nunca vai para este repositório.
+- **Dois jeitos de avaliar a fala** (em *Configurações*):
+  - **Chrome (grátis)** com **modo rigoroso**: usa o primeiro palpite do reconhecimento, sem escolher a versão que mais parece com a frase certa,
+    e mostra a "certeza" do Chrome. Atenção: o reconhecimento do Chrome sempre tenta adivinhar palavras reais, então ele nunca mostra exatamente o som que você fez.
+  - **Microsoft Pronunciation Assessment** (cota grátis de 5 h/mês): nota para cada **som (fonema)**, fluência, completude e entonação.
+    Mostra, por exemplo, que o /θ/ de *think* soou como /f/. Precisa de uma chave do Azure Speech (veja abaixo).
 - **Voz da ElevenLabs** (opcional): cole a sua chave em Configurações. Cada frase é gerada uma vez só e fica guardada,
   então ouvir de novo (inclusive devagar) não gasta créditos. Sem chave, o app usa a voz do navegador.
 
@@ -46,6 +53,14 @@ Tudo fica salvo **no seu navegador** (nada vai para servidor nenhum). Use *Confi
 
 elevenlabs.io → clique no seu perfil → **API Keys** → **Create API Key**. Copie e cole em *Configurações* no app.
 O modelo *Flash v2.5* gasta metade dos créditos do *Multilingual v2*.
+
+## Como pegar a chave da Microsoft (avaliação por fonema)
+
+1. Entre em portal.azure.com (dá para criar a conta grátis).
+2. **Create a resource** → procure **Speech** → Create.
+3. Escolha uma região (ex.: *East US*) e o plano **Free F0**. Crie.
+4. Abra o recurso → **Keys and Endpoint** → copie a **Key 1** e a **Location/Region**.
+5. No app: *Configurações → Como avaliar a sua fala* → Microsoft → cole a chave, escolha a mesma região → Salvar.
 
 ## Adicionar ou editar lições
 
