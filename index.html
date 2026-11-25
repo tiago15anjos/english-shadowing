@@ -47,6 +47,7 @@
             <ul id="customList" class="custom-list"></ul>
           </div>
 
+          <div class="work-row">
           <div id="sentenceCard" class="card sentence-card">
             <div class="sentence-top">
               <span id="counter" class="muted"></span>
@@ -61,6 +62,10 @@
 
             <div id="writeBox" class="write-box hidden">
               <textarea id="writeInput" rows="2" placeholder="Escreva a frase em inglês…" autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="false"></textarea>
+              <div class="word-hints-wrap">
+                <span class="muted small">Dicas: passe o mouse sobre um espaço para ver a palavra.</span>
+                <div id="wordHints" class="word-hints"></div>
+              </div>
               <div class="controls">
                 <button id="btnCheck" class="btn primary">Verificar <span class="kbd-hint">Enter</span></button>
                 <button id="btnReveal" class="btn">Ver resposta</button>
@@ -93,6 +98,9 @@
                 <button id="btnRetry" class="btn">● Tentar de novo</button>
               </div>
             </div>
+          </div>
+
+          <aside id="doneBoard" class="card done-board"></aside>
           </div>
 
           <p class="muted shortcuts">Atalhos: <kbd>Espaço</kbd> ouvir · <kbd>S</kbd> devagar · <kbd>R</kbd> gravar · <kbd>←</kbd> <kbd>→</kbd> navegar</p>

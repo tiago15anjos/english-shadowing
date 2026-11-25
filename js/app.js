@@ -374,7 +374,55 @@
   const currentMode = () => sectionMode(currentSection().sec);
   let writeChecked = false;
 
-  function renderSentence() {
+  function renderSentence() { renderSentenceCard(); renderBoard(); }
+
+  // ---- side board: what is already done in this section, and how much is left
+  function renderBoard() {
+    const board = $("#doneBoard");
+    const { lesson, sec } = currentSection();
+    if (!lesson || !sec || lesson.id === CUSTOM_ID) { board.classList.add("hidden"); return; }
+    const mode = sectionMode(sec);
+    const best = bestScores();
+    const items = sec.items.map((it, j) => ({ it, j, sid: sentenceId(lesson.id, pos.section, it, j) }));
+    const done = items.filter((x) => (best[x.sid] || 0) >= settings.pass);
+    const left = items.length - done.length;
+    const title = mode === "write" ? "Frases superadas" : mode === "answer" ? "Perguntas respondidas" : "Frases dominadas";
+    const pct = Math.round((done.length / items.length) * 100);
+    const chipCount = $(`#sectionChips .chip[data-i="${pos.section}"] .muted`);
+    if (chipCount) chipCount.textContent = `${done.length}/${items.length}`;
+    board.innerHTML = `<h4>${title}</h4>
+      <div class="board-count"><b>${done.length}</b> de ${items.length}</div>
+      <div class="bar"><span style="width:${pct}%"></span></div>
+      <p class="muted small">${left ? `Faltam <b>${left}</b> ${left === 1 ? "frase" : "frases"} para terminar.` : "Tarefa concluída! 🎉"}</p>
+      <ol class="board-list">${done.map((x) => `<li data-j="${x.j}" class="${x.j === pos.index ? "current" : ""}" title="Abrir">
+        <span class="ck">✓</span><span class="bt">${esc(x.it.en)}</span>${mode === "write" && (best[x.sid + "~say"] || 0) >= settings.pass ? `<span class="mic" title="Pronúncia aprovada">🎙</span>` : ""}</li>`).join("") || `<li class="empty muted small">As frases que você acertar aparecem aqui.</li>`}</ol>`;
+    board.classList.remove("hidden");
+    $$("#doneBoard li[data-j]").forEach((li) => li.addEventListener("click", () => { pos.index = +li.dataset.j; savePos(); stopAudio(); renderSentence(); }));
+  }
+
+  // ---- spelling hints for the writing exercise (hover a blank to see the word)
+  let hintsUsed = 0;
+  function renderWordHints(it) {
+    hintsUsed = 0;
+    const toks = it.en.split(/\s+/).filter(Boolean);
+    $("#wordHints").innerHTML = toks.map((t, i) => {
+      const core = t.replace(/^[^A-Za-z0-9']+|[^A-Za-z0-9']+$/g, "");
+      const mask = core.replace(/[A-Za-z0-9]/g, "_");
+      return `<span class="wh" data-i="${i}" data-c="${esc(Compare.cleanToken(core))}"><span class="mask">${esc(mask || t)}</span><span class="full">${esc(core || t)}</span></span>`;
+    }).join("");
+    $$("#wordHints .wh").forEach((el) => {
+      const peek = () => { if (!el.classList.contains("used") && !el.classList.contains("ok")) { el.classList.add("used"); hintsUsed++; } };
+      el.addEventListener("mouseenter", peek);
+      el.addEventListener("click", () => { peek(); el.classList.toggle("open"); });
+    });
+  }
+  function updateWordHints() {
+    const typed = $("#writeInput").value.split(/\s+/).filter(Boolean).map((t) => Compare.cleanToken(t));
+    $$("#wordHints .wh").forEach((el) => el.classList.toggle("ok", typed[+el.dataset.i] === el.dataset.c && !!el.dataset.c));
+  }
+  $("#writeInput").addEventListener("input", updateWordHints);
+
+  function renderSentenceCard() {
     const it = currentItem();
     writeChecked = false;
     const card = $("#sentenceCard");
@@ -397,6 +445,8 @@
     $(".toggles").classList.toggle("hidden", mode !== "shadow");
     $("#writeBox").classList.toggle("hidden", mode !== "write");
     $("#btnRecord").classList.toggle("hidden", mode === "write");
+    $("#btnRecord").textContent = mode === "write" ? "● Gravar a frase" : "● Gravar";
+    $("#btnRetry").textContent = mode === "write" ? "● Gravar a frase" : "● Tentar de novo";
     $("#btnPlay").classList.toggle("hidden", mode === "write");
     $("#btnSlow").classList.toggle("hidden", mode === "write");
     $("#saidLabel").textContent = mode === "write" ? "Você escreveu:" : mode === "answer" ? "Sua resposta:" : "Você disse:";
@@ -407,6 +457,7 @@
       $("#targetPt").classList.add("hidden");
       $("#hint").textContent = "Escreva em inglês e aperte Enter. Depois você ouve a resposta certa.";
       $("#writeInput").value = "";
+      renderWordHints(it);
       setTimeout(() => $("#writeInput").focus(), 0);
       return;
     }
@@ -443,8 +494,11 @@
     }
     if (reveal && !typed) r.score = 0;
     writeChecked = true;
-    $("#btnPlay").classList.remove("hidden"); $("#btnSlow").classList.remove("hidden");
-    showResult(target, typed || "(sem resposta)", r, { engine: "writing" });
+    $("#btnPlay").classList.remove("hidden"); $("#btnSlow").classList.remove("hidden"); $("#btnRecord").classList.remove("hidden");
+    showResult(target, typed || "(sem resposta)", r, { engine: "writing", hints: hintsUsed });
+    $$("#wordHints .wh").forEach((el) => el.classList.add("open"));
+    if (hintsUsed) $("#resultMissed").insertAdjacentHTML("beforeend", `<div class="muted small">Você usou ${hintsUsed} ${hintsUsed === 1 ? "dica" : "dicas"}.</div>`);
+    $("#resultMissed").insertAdjacentHTML("beforeend", `<div class="muted small">Agora grave a frase em voz alta para treinar a pronúncia (● Gravar a frase).</div>`);
     if (it.alt && target === it) toast("Também vale: " + [].concat(it.alt).join(" / "));
     speak(it.en);
   }
@@ -564,8 +618,12 @@
 
   async function doRecord() {
     if (recognizing) { recognizing.stop(); return; }
-    const it = currentItem();
+    let it = currentItem();
     if (!it) return;
+    if (currentMode() === "write") {
+      if (!writeChecked) { toast("Primeiro escreva e verifique a frase. Depois você grava."); return; }
+      it = Object.assign({}, it, { sid: it.sid + "~say" });
+    }
     if (!useAzure() && !SR) { toast("Use o Google Chrome para gravar, ou configure a avaliação da Microsoft."); return; }
     stopAudio();
     const btn = $("#btnRecord");
@@ -602,7 +660,7 @@
       $("#liveTranscript").textContent = msg;
     } finally {
       recognizing = null;
-      btn.classList.remove("recording"); btn.textContent = "● Gravar";
+      btn.classList.remove("recording"); btn.textContent = currentMode() === "write" ? "● Gravar a frase" : "● Gravar";
     }
   }
 
@@ -656,12 +714,15 @@
 
     const attempt = { t: Date.now(), lesson: it.lesson.id, sid: it.sid, target: it.en, said, score: r.score, missed: r.missed, engine: meta.engine };
     if (isAzure) attempt.scores = r.scores;
+    if (meta.hints) attempt.hints = meta.hints;
     attempts.push(attempt);
     saveAttempts();
     renderLessonList();
     const { sec } = currentSection();
     const best = bestScores()[it.sid];
-    $("#counter").innerHTML = `${currentMode() === "write" ? "Exercício" : "Frase"} ${pos.index + 1} de ${sec.items.length} · melhor nota: <b>${best}</b>`;
+    const isSay = it.sid.endsWith("~say");
+    $("#counter").innerHTML = `${currentMode() === "write" ? "Exercício" : "Frase"} ${pos.index + 1} de ${sec.items.length} · melhor nota${isSay ? " na pronúncia" : ""}: <b>${best}</b>`;
+    renderBoard();
   }
 
   // Free answer to a conversation question: show the transcript, keep it, no score.
@@ -679,7 +740,7 @@
     $("#btnMine").disabled = $("#btnCompare").disabled = !lastRecording;
     $("#result").classList.remove("hidden");
     attempts.push({ t: Date.now(), lesson: it.lesson.id, sid: it.sid, target: it.en, said: text, score: 100, missed: [], engine: "answer" });
-    saveAttempts(); renderLessonList();
+    saveAttempts(); renderLessonList(); renderBoard();
   }
 
   // Phoneme breakdown of one word (Microsoft engine).
